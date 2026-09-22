@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 8h3l2-5 4 10 2-5h3' fill='none' stroke='%234da3ff' stroke-width='2'/%3E%3C/svg%3E" />
+  <title>地震到时拾取审阅台</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">〰</span>
+      <span>地震到时拾取审阅台</span>
+    </div>
+    <div class="toolbar">
+      <select id="dataset-select" title="选择数据集"></select>
+      <button id="btn-demo" class="btn">载入演示数据</button>
+      <label class="btn btn-file">
+        导入 JSON
+        <input id="file-import" type="file" accept="application/json,.json" hidden />
+      </label>
+      <button id="btn-export" class="btn" disabled>导出审阅结果</button>
+      <button id="btn-delete" class="btn btn-danger" disabled>删除数据集</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="wave-pane">
+      <div class="wave-toolbar">
+        <div class="phase-switch">
+          <label><input type="radio" name="new-phase" value="P" checked /> 新增 P</label>
+          <label><input type="radio" name="new-phase" value="S" /> 新增 S</label>
+        </div>
+        <label class="u-input">不确定窗 ±<input id="new-uncertainty" type="number"
+               min="0" step="10" value="50" /> ms</label>
+        <span class="hint">滚轮缩放 · 右键/Shift+拖拽平移 · 左键波形空白添加 · 拖拽标记调整 · 双击标记删除</span>
+        <span class="spacer"></span>
+        <button id="btn-reset-view" class="btn btn-small">重置视图</button>
+        <span id="cursor-time" class="cursor-time"></span>
+      </div>
+      <div id="wave-scroll" class="wave-scroll">
+        <canvas id="wave-canvas"></canvas>
+        <div id="empty-state" class="empty-state">
+          <p>没有打开的数据集</p>
+          <p class="sub">点击「载入演示数据」，或「导入 JSON」导入带时间戳的波形采样</p>
+        </div>
+      </div>
+      <div id="pick-editor" class="pick-editor" hidden>
+        <span id="pe-label" class="pe-label"></span>
+        <label>到时 <input id="pe-time" type="datetime-local" step="0.001" /></label>
+        <label>±不确定窗 <input id="pe-unc" type="number" min="0" step="10" /> ms</label>
+        <label>权重 <input id="pe-weight" type="number" min="0.01" step="0.1" /></label>
+        <span class="spacer"></span>
+        <button id="pe-reject" class="btn btn-small">拒绝</button>
+        <button id="pe-accept" class="btn btn-small btn-primary">接受此条</button>
+        <button id="pe-delete" class="btn btn-small btn-danger">删除</button>
+      </div>
+    </section>
+
+    <aside class="review-pane">
+      <div class="review-head">
+        <h2>审阅面板</h2>
+        <div id="summary" class="summary"></div>
+      </div>
+      <div id="review-list" class="review-list">
+        <p class="placeholder">打开数据集后在此按台站 / 震相查看冲突与加权共识</p>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

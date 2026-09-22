@@ -1,0 +1,14 @@
+services:
+  seismic-review:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seismic-pick-review
+    ports:
+      - "8000:8000"
+    volumes:
+      - seismic-data:/data
+    restart: unless-stopped
+
+volumes:
+  seismic-data:
