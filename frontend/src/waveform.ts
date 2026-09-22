@@ -91,7 +91,10 @@ export class WaveformView {
   }
 
   clear() {
-    this.setData([], { groups: [], conflicts: [], rejected: [], reviews: [] });
+    this.setData([], {
+      groups: [], conflicts: [], rejected: [], reviews: [],
+      conflict_action: null,
+    });
   }
 
   setAnalysis(analysis: Analysis) {

@@ -109,7 +109,19 @@ npm run watch
 | 「接受」/「接受共识」 | 生成已审阅到时（手动 / consensus 两种来源） |
 | 「撤销」 | 删除已接受记录，候选拾取仍保留 |
 | 「拒绝」/「恢复」 | 排除或重新纳入某条候选拾取 |
+| 「冲突处置」卡片 | 勾选多个冲突组，一键拒绝其全部离群簇拾取（单事务），可整体撤销一次 |
 | 「导出审阅结果」 | 下载 JSON（见下） |
+
+## 冲突处置工作流
+
+审阅面板顶部的「冲突处置」卡片汇总所有仍存在多个不重叠簇的 (台站, 震相) 组，
+逐组预览主簇与各离群簇的加权共识及将被拒绝的拾取数；勾选若干组后点击
+「拒绝所选离群簇」，后端在**单个事务**中重新聚类校验并把所选组的全部离群簇
+拾取置为 `rejected`，逐条返回变更明细；任何一步失败整体回滚。
+
+每次批量处置记录为一个批次，面板上的「撤销上次批量处置」可将**最近一次**
+批次中拒绝的拾取全部恢复为候选（仅一次；再次批量处置后旧批次不可再撤销）。
+处置或撤销后，冲突标记、加权共识与导出结果立即刷新。
 
 ## 导出内容
 
@@ -135,6 +147,8 @@ PATCH  /api/datasets/{id}/picks/{pid}        修改时间/窗口/权重/震相
 POST   /api/datasets/{id}/picks/{pid}/reject
 POST   /api/datasets/{id}/picks/{pid}/restore
 DELETE /api/datasets/{id}/picks/{pid}
+POST   /api/datasets/{id}/conflicts/reject-outliers   批量拒绝所选组的离群簇（单事务）
+POST   /api/datasets/{id}/conflicts/undo              撤销最近一次批量处置
 POST   /api/datasets/{id}/reviews            接受（manual / consensus）
 DELETE /api/datasets/{id}/reviews/{rid}      撤销接受
 ```
@@ -148,6 +162,7 @@ DELETE /api/datasets/{id}/reviews/{rid}      撤销接受
 │   ├── app/
 │   │   ├── main.py           # FastAPI 路由
 │   │   ├── consensus.py      # 区间重叠聚类 + 加权共识
+│   │   ├── conflicts.py      # 批量冲突处置（事务 + 一次撤销）
 │   │   ├── importer.py       # 两种 JSON 形态导入与校验
 │   │   ├── database.py       # SQLite schema / 连接管理
 │   │   ├── crud.py           # 数据持久化

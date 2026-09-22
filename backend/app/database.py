@@ -80,8 +80,38 @@ def init_db() -> None:
                 created_at    TEXT NOT NULL
             );
 
+            -- One batch "reject outlier clusters" action per dataset; the most
+            -- recent active row backs the single-step undo.  When a batch is
+            -- undone (or superseded by a new batch) its row is marked undone/
+            -- superseded but kept for audit.
+            CREATE TABLE IF NOT EXISTS conflict_actions (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                dataset_id    INTEGER NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+                kind          TEXT NOT NULL DEFAULT 'reject_outliers',
+                status        TEXT NOT NULL DEFAULT 'active'
+                              CHECK (status IN ('active','undone','superseded')),
+                group_count   INTEGER NOT NULL,
+                change_count  INTEGER NOT NULL,
+                created_at    TEXT NOT NULL,
+                undone_at     TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS conflict_action_changes (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                action_id     INTEGER NOT NULL
+                              REFERENCES conflict_actions(id) ON DELETE CASCADE,
+                pick_id       INTEGER NOT NULL,
+                station       TEXT NOT NULL,
+                phase         TEXT NOT NULL,
+                previous_status TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_traces_dataset  ON traces(dataset_id);
             CREATE INDEX IF NOT EXISTS idx_picks_dataset   ON picks(dataset_id);
             CREATE INDEX IF NOT EXISTS idx_reviews_dataset ON reviews(dataset_id);
+            CREATE INDEX IF NOT EXISTS idx_conflict_actions_dataset
+                ON conflict_actions(dataset_id);
+            CREATE INDEX IF NOT EXISTS idx_conflict_changes_action
+                ON conflict_action_changes(action_id);
             """
         )

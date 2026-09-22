@@ -44,6 +44,8 @@ class App {
       onRestore: (id) => this.restorePick(id),
       onUndoReview: (id) => this.undoReview(id),
       onFocusTime: (t) => this.wave.focusTime(t),
+      onRejectOutliers: (groups) => this.rejectOutliers(groups),
+      onUndoConflicts: () => this.undoConflicts(),
     });
 
     this.bindChrome();
@@ -90,6 +92,7 @@ class App {
         this.wave.clear();
         this.panel.render({
           groups: [], conflicts: [], rejected: [], reviews: [],
+          conflict_action: null,
         });
         $("#empty-state").style.display = "";
         $("#btn-export").disabled = true;
@@ -324,6 +327,53 @@ class App {
       await api.undoReview(this.dsId!, id);
       await this.reloadAnalysis();
     }, "撤销失败");
+  }
+
+  // ------------------------------------------------- conflict disposition -
+  private rejectOutliers(groups: { station: string; phase: Group["phase"] }[]) {
+    const label = groups
+      .map(g => `${g.station}/${g.phase}`).join("、");
+    if (!confirm(`在一次事务中拒绝以下 ${groups.length} 组的全部离群簇拾取？\n${label}`)) {
+      return;
+    }
+    this.panel.setBusy(true);
+    this.run(async () => {
+      try {
+        const res = await api.rejectOutliers(this.dsId!, groups);
+        this.panel.clearConflictSelection();
+        if (this.selectedPickId
+            && res.changes.some(c => c.pick_id === this.selectedPickId)) {
+          this.selectPick(null);
+        }
+        await this.reloadAnalysis();
+        let detail = `已拒绝 ${res.changes.length} 条离群拾取`
+          + `（${res.action.group_count} 组），可立即撤销`;
+        if (res.skipped.length) {
+          detail += `；${res.skipped.length} 组已无冲突被跳过`;
+        }
+        this.toast(detail);
+      } finally {
+        this.panel.setBusy(false);
+      }
+    }, "批量拒绝离群簇失败");
+  }
+
+  private undoConflicts() {
+    this.panel.setBusy(true);
+    this.run(async () => {
+      try {
+        const res = await api.undoConflicts(this.dsId!);
+        this.panel.clearConflictSelection();
+        await this.reloadAnalysis();
+        let msg = `已撤销批量处置 #${res.action.id}，恢复 ${res.changes.length} 条拾取`;
+        if (res.missing_pick_ids.length) {
+          msg += `（${res.missing_pick_ids.length} 条已被删除）`;
+        }
+        this.toast(msg);
+      } finally {
+        this.panel.setBusy(false);
+      }
+    }, "撤销冲突处置失败");
   }
 
   // ------------------------------------------------------------- utils -----

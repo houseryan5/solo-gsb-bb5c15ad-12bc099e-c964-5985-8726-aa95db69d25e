@@ -1,5 +1,6 @@
 import type {
-  Analysis, DatasetDetail, DatasetMeta, Phase, Review,
+  Analysis, ConflictRejectResult, ConflictUndoResult, DatasetDetail,
+  DatasetMeta, Phase, Review,
 } from "./types.js";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -77,6 +78,15 @@ export const api = {
   undoReview: (ds: number, id: number) =>
     req<{ status: string }>(
       `/api/datasets/${ds}/reviews/${id}`, { method: "DELETE" }),
+
+  rejectOutliers: (ds: number, groups: { station: string; phase: Phase }[]) =>
+    req<ConflictRejectResult>(
+      `/api/datasets/${ds}/conflicts/reject-outliers`,
+      jsonInit("POST", { groups })),
+
+  undoConflicts: (ds: number) =>
+    req<ConflictUndoResult>(
+      `/api/datasets/${ds}/conflicts/undo`, jsonInit("POST")),
 
   exportUrl: (id: number) => `/api/datasets/${id}/export`,
 };

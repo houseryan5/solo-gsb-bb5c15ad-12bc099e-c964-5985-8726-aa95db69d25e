@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from . import conflicts as conflict_flow
 from . import crud
 from .config import STATIC_DIR
 from .consensus import analyze
@@ -52,6 +53,15 @@ class ReviewIn(BaseModel):
     pick_id: int | None = None
     cluster_id: int | None = None
     note: str = Field(default="", max_length=400)
+
+
+class ConflictGroupIn(BaseModel):
+    station: str = Field(min_length=1, max_length=40)
+    phase: Literal["P", "S"]
+
+
+class ConflictRejectIn(BaseModel):
+    groups: list[ConflictGroupIn] = Field(min_length=1)
 
 
 # ------------------------------------------------------------- datasets ------
@@ -102,6 +112,7 @@ def api_analysis(ds_id: int) -> dict[str, Any]:
     _require_dataset(ds_id)
     result = analyze(crud.get_picks(ds_id))
     result["reviews"] = crud.get_reviews(ds_id)
+    result["conflict_action"] = conflict_flow.get_active_action(ds_id)
     return result
 
 
@@ -247,6 +258,26 @@ def api_delete_pick(ds_id: int, pick_id: int) -> dict[str, str]:
     _require_pick(ds_id, pick_id)
     crud.delete_pick(ds_id, pick_id)
     return {"status": "deleted"}
+
+
+# ------------------------------------------------- conflict disposition ----
+@app.post("/api/datasets/{ds_id}/conflicts/reject-outliers")
+def api_reject_outliers(ds_id: int, body: ConflictRejectIn) -> dict[str, Any]:
+    _require_dataset(ds_id)
+    selections = [{"station": g.station, "phase": g.phase} for g in body.groups]
+    try:
+        return conflict_flow.reject_outlier_clusters(ds_id, selections)
+    except conflict_flow.ConflictError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.post("/api/datasets/{ds_id}/conflicts/undo")
+def api_undo_conflicts(ds_id: int) -> dict[str, Any]:
+    _require_dataset(ds_id)
+    try:
+        return conflict_flow.undo_last_action(ds_id)
+    except conflict_flow.ConflictError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 # --------------------------------------------------------------- reviews -----
