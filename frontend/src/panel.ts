@@ -9,6 +9,8 @@ export interface PanelCallbacks {
   onRestore: (id: number) => void;
   onUndoReview: (id: number) => void;
   onFocusTime: (timeMs: number) => void;
+  onResolveConflicts: (groups: { station: string; phase: Group["phase"] }[]) => void;
+  onUndoResolution: (resolutionId: number) => void;
 }
 
 const PHASE_COLOR: Record<string, string> = { P: "#ff7a59", S: "#46d39a" };
@@ -24,11 +26,16 @@ export class ReviewPanel {
   private summary: HTMLElement;
   private cb: PanelCallbacks;
   private selectedPickId: number | null = null;
+  private checkedGroups = new Set<string>();
 
   constructor(root: HTMLElement, summary: HTMLElement, cb: PanelCallbacks) {
     this.root = root;
     this.summary = summary;
     this.cb = cb;
+  }
+
+  static groupKey(station: string, phase: string): string {
+    return `${station}|${phase}`;
   }
 
   setSelected(id: number | null) {
@@ -42,6 +49,8 @@ export class ReviewPanel {
   render(analysis: Analysis) {
     this.root.innerHTML = "";
     this.renderSummary(analysis);
+    this.renderResolutionDock(analysis);
+    this.renderUndoBar(analysis);
 
     const reviewedKeys = new Set(
       analysis.reviews.map(r => `${r.station}|${r.phase}`));
@@ -73,17 +82,186 @@ export class ReviewPanel {
   }
 
   private renderSummary(a: Analysis) {
-    const conflictGroups = a.groups.filter(g => g.conflict).length;
+    const conflictGroups = a.groups.filter(g => g.conflict);
+    const pendingPicks = conflictGroups.reduce(
+      (n, g) => n + g.picks.filter(p => p.is_outlier).length, 0);
     const reviewed = a.reviews.length;
     const candidates = a.groups.reduce((n, g) => n + g.picks.length, 0);
     const items = [
       `<span class="badge">候选 <b>${candidates}</b></span>`,
       `<span class="badge">已接受 <b>${reviewed}</b></span>`,
-      `<span class="badge ${conflictGroups ? "bad" : "ok"}">`
-      + `冲突组 <b>${conflictGroups}</b></span>`,
+      `<span class="badge ${conflictGroups.length ? "bad" : "ok"}">`
+      + `待处置 <b>${conflictGroups.length}</b> 组 / `
+      + `<b>${pendingPicks}</b> 条离群</span>`,
       `<span class="badge">已拒绝 <b>${a.rejected.length}</b></span>`,
     ];
     this.summary.innerHTML = items.join("");
+  }
+
+  // ------------------------------------------------- conflict resolution ---
+  private renderResolutionDock(a: Analysis) {
+    const conflictGroups = a.groups.filter(g => g.conflict);
+    if (!conflictGroups.length) return;
+
+    // Newly appearing groups default to checked; disappear on their own.
+    const current = new Set(
+      conflictGroups.map(g => ReviewPanel.groupKey(g.station, g.phase)));
+    for (const key of current) {
+      if (!this.checkedGroups.has(key)) this.checkedGroups.add(key);
+    }
+    for (const key of [...this.checkedGroups]) {
+      if (!current.has(key)) this.checkedGroups.delete(key);
+    }
+
+    const dock = h("div", "resolution-dock");
+    const head = h("div", "resolution-head");
+    const title = h("span", "resolution-title");
+    title.textContent = "⚡ 冲突处置";
+    head.appendChild(title);
+    const selectAll = h("button", "mini link");
+    selectAll.textContent = "全选";
+    selectAll.addEventListener("click", () => {
+      this.checkedGroups = new Set(current);
+      this.render(a);
+    });
+    head.appendChild(selectAll);
+    const selectNone = h("button", "mini link");
+    selectNone.textContent = "清空";
+    selectNone.addEventListener("click", () => {
+      this.checkedGroups = new Set();
+      this.render(a);
+    });
+    head.appendChild(selectNone);
+    dock.appendChild(head);
+
+    for (const g of conflictGroups) {
+      dock.appendChild(this.renderConflictPreview(a, g));
+    }
+
+    const footer = h("div", "resolution-footer");
+    const info = h("span", "resolution-info");
+    const apply = h("button", "btn btn-small btn-reject-outliers") as HTMLButtonElement;
+    apply.textContent = "拒绝所选离群簇";
+    const refreshApply = () => {
+      const chosen = conflictGroups.filter(g =>
+        this.checkedGroups.has(ReviewPanel.groupKey(g.station, g.phase)));
+      const pickN = chosen.reduce(
+        (n, g) => n + g.picks.filter(p => p.is_outlier).length, 0);
+      info.textContent = chosen.length
+        ? `已选 ${chosen.length} 组 · 将拒绝 ${pickN} 条离群拾取`
+        : "未选择分组";
+      apply.disabled = !chosen.length;
+    };
+    apply.addEventListener("click", () => {
+      const chosen = conflictGroups
+        .filter(g => this.checkedGroups.has(
+          ReviewPanel.groupKey(g.station, g.phase)))
+        .map(g => ({ station: g.station, phase: g.phase }));
+      if (!chosen.length) return;
+      const pickN = conflictGroups
+        .filter(g => this.checkedGroups.has(
+          ReviewPanel.groupKey(g.station, g.phase)))
+        .reduce((n, g) => n + g.picks.filter(p => p.is_outlier).length, 0);
+      if (!confirm(`确认拒绝所选 ${chosen.length} 个组中的 ${pickN} 条离群簇拾取？\n`
+        + "（可在处置后一次性撤销恢复）")) return;
+      this.cb.onResolveConflicts(chosen);
+    });
+    footer.appendChild(info);
+    footer.appendChild(apply);
+    dock.appendChild(footer);
+    this.root.appendChild(dock);
+    refreshApply();
+  }
+
+  private renderConflictPreview(a: Analysis, g: Group): HTMLElement {
+    const key = ReviewPanel.groupKey(g.station, g.phase);
+    const row = h("div", "conflict-preview");
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "conflict-check";
+    cb.checked = this.checkedGroups.has(key);
+    cb.addEventListener("click", (e) => e.stopPropagation());
+    cb.addEventListener("change", () => {
+      if (cb.checked) this.checkedGroups.add(key);
+      else this.checkedGroups.delete(key);
+      const footer = this.root.querySelector(".resolution-footer");
+      if (footer) {
+        const groups = a.groups.filter(x => x.conflict);
+        const chosen = groups.filter(x => this.checkedGroups.has(
+          ReviewPanel.groupKey(x.station, x.phase)));
+        const pickN = chosen.reduce(
+          (n, x) => n + x.picks.filter(p => p.is_outlier).length, 0);
+        const info = footer.querySelector<HTMLElement>(".resolution-info");
+        const btn = footer.querySelector<HTMLButtonElement>(".btn-reject-outliers");
+        if (info) {
+          info.textContent = chosen.length
+            ? `已选 ${chosen.length} 组 · 将拒绝 ${pickN} 条离群拾取`
+            : "未选择分组";
+        }
+        if (btn) btn.disabled = !chosen.length;
+      }
+    });
+    row.appendChild(cb);
+
+    const body = h("div", "conflict-body");
+    const label = h("div", "conflict-label");
+    const tag = h("span", `tag ${g.phase}`);
+    tag.textContent = g.phase;
+    label.appendChild(tag);
+    const name = h("span", "conflict-station");
+    name.textContent = g.station;
+    name.title = "在波形中定位主簇";
+    name.addEventListener("click", () => {
+      const c = g.clusters.find(c => c.primary) ?? g.clusters[0];
+      this.cb.onFocusTime(c.consensus_time);
+    });
+    label.appendChild(name);
+    const nClusters = h("span", "conflict-n");
+    nClusters.textContent = `${g.clusters.length} 簇`;
+    label.appendChild(nClusters);
+    body.appendChild(label);
+
+    const detail = h("div", "conflict-cluster-summary");
+    const primary = g.clusters.find(c => c.primary)!;
+    const outlierClusters = g.clusters.filter(c => !c.primary);
+    const primaryEl = h("span", "cluster-sum primary");
+    primaryEl.textContent = `主簇 ${primary.size} 条`
+      + ` @ ${msToIso(primary.consensus_time).slice(11, 23)}`
+      + ` ±${primary.consensus_uncertainty}ms`;
+    detail.appendChild(primaryEl);
+    const outN = outlierClusters.reduce((n, c) => n + c.size, 0);
+    const outEl = h("span", "cluster-sum outlier");
+    outEl.textContent = `离群 ${outlierClusters.length} 簇 / ${outN} 条`;
+    for (const c of outlierClusters) {
+      const chip = h("span", "outlier-chip");
+      chip.textContent = `${c.size}×${msToIso(c.consensus_time).slice(11, 23)}`;
+      chip.title = `加权共识 ${msToIso(c.consensus_time)} `
+        + `±${c.consensus_uncertainty}ms，将拒绝 ${c.size} 条`;
+      outEl.appendChild(chip);
+    }
+    detail.appendChild(outEl);
+    body.appendChild(detail);
+    row.appendChild(body);
+    return row;
+  }
+
+  private renderUndoBar(a: Analysis) {
+    const last = a.last_resolution;
+    if (!last || last.undone_at) return;
+    const bar = h("div", "undo-resolution-bar");
+    const info = h("span");
+    const groupNames = last.groups
+      .map(g => `${g.station}/${g.phase}`).join("、");
+    info.textContent = `已批量拒绝 ${last.rejected_count} 条离群拾取`
+      + `（${groupNames}），可一次性撤销`;
+    bar.appendChild(info);
+    const undo = h("button", "mini undo");
+    undo.textContent = "↩ 撤销处置";
+    undo.addEventListener("click", () =>
+      this.cb.onUndoResolution(last.id));
+    bar.appendChild(undo);
+    this.root.appendChild(bar);
   }
 
   private renderGroup(g: Group, reviews: Review[], reviewed: boolean): HTMLElement {

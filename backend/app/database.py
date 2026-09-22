@@ -80,8 +80,27 @@ def init_db() -> None:
                 created_at    TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS conflict_resolutions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                dataset_id  INTEGER NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+                groups_json TEXT NOT NULL DEFAULT '[]',
+                created_at  TEXT NOT NULL,
+                undone_at   TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS conflict_resolution_items (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                resolution_id  INTEGER NOT NULL
+                               REFERENCES conflict_resolutions(id) ON DELETE CASCADE,
+                pick_id        INTEGER NOT NULL,
+                from_status    TEXT NOT NULL,
+                to_status      TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_traces_dataset  ON traces(dataset_id);
             CREATE INDEX IF NOT EXISTS idx_picks_dataset   ON picks(dataset_id);
             CREATE INDEX IF NOT EXISTS idx_reviews_dataset ON reviews(dataset_id);
+            CREATE INDEX IF NOT EXISTS idx_res_ds          ON conflict_resolutions(dataset_id);
+            CREATE INDEX IF NOT EXISTS idx_res_items_res   ON conflict_resolution_items(resolution_id);
             """
         )

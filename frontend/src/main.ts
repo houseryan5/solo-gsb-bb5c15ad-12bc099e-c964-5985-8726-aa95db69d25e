@@ -44,6 +44,8 @@ class App {
       onRestore: (id) => this.restorePick(id),
       onUndoReview: (id) => this.undoReview(id),
       onFocusTime: (t) => this.wave.focusTime(t),
+      onResolveConflicts: (groups) => this.resolveConflicts(groups),
+      onUndoResolution: (id) => this.undoResolution(id),
     });
 
     this.bindChrome();
@@ -90,6 +92,7 @@ class App {
         this.wave.clear();
         this.panel.render({
           groups: [], conflicts: [], rejected: [], reviews: [],
+          last_resolution: null,
         });
         $("#empty-state").style.display = "";
         $("#btn-export").disabled = true;
@@ -183,8 +186,13 @@ class App {
   private async reloadAnalysis() {
     if (this.dsId == null) return;
     this.analysis = await api.getAnalysis(this.dsId);
-    this.wave.setAnalysis(this.analysis);
-    this.panel.render(this.analysis);
+    this.applyAnalysis(this.analysis);
+  }
+
+  private applyAnalysis(analysis: Analysis) {
+    this.analysis = analysis;
+    this.wave.setAnalysis(analysis);
+    this.panel.render(analysis);
     this.panel.setSelected(this.selectedPickId);
     this.wave.setSelected(this.selectedPickId);
     this.refreshEditor();
@@ -324,6 +332,33 @@ class App {
       await api.undoReview(this.dsId!, id);
       await this.reloadAnalysis();
     }, "撤销失败");
+  }
+
+  // -------------------------------------------------- conflict resolution --
+  private resolveConflicts(groups: { station: string; phase: Phase }[]) {
+    this.run(async () => {
+      const res = await api.resolveConflicts(this.dsId!, groups);
+      const changed = res.resolution.changes.filter(c =>
+        c.from_status !== c.to_status).length;
+      // rejected picks disappear from the candidate selection
+      if (this.selectedPickId
+          && res.resolution.changes.some(c => c.id === this.selectedPickId)) {
+        this.selectPick(null);
+      }
+      this.applyAnalysis(res.analysis);
+      this.toast(`已拒绝 ${changed} 条离群簇拾取（${groups.length} 组），可在面板中撤销`);
+    }, "冲突处置失败");
+  }
+
+  private undoResolution(id: number) {
+    this.run(async () => {
+      const res = await api.undoConflictResolution(this.dsId!, id);
+      this.applyAnalysis(res.analysis);
+      const note = res.undo.missing_pick_ids.length
+        ? `，${res.undo.missing_pick_ids.length} 条已删除无法恢复`
+        : "";
+      this.toast(`已撤销冲突处置，恢复 ${res.undo.restored.length} 条拾取${note}`);
+    }, "撤销处置失败");
   }
 
   // ------------------------------------------------------------- utils -----

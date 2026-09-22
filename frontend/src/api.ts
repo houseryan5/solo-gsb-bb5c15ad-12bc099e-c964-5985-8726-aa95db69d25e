@@ -1,5 +1,6 @@
 import type {
-  Analysis, DatasetDetail, DatasetMeta, Phase, Review,
+  Analysis, DatasetDetail, DatasetMeta, Phase,
+  ResolveConflictsResponse, Review, UndoConflictsResponse,
 } from "./types.js";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -77,6 +78,15 @@ export const api = {
   undoReview: (ds: number, id: number) =>
     req<{ status: string }>(
       `/api/datasets/${ds}/reviews/${id}`, { method: "DELETE" }),
+
+  resolveConflicts: (ds: number, groups: { station: string; phase: Phase }[]) =>
+    req<ResolveConflictsResponse>(
+      `/api/datasets/${ds}/conflict-resolutions`, jsonInit("POST", { groups })),
+
+  undoConflictResolution: (ds: number, resolutionId: number) =>
+    req<UndoConflictsResponse>(
+      `/api/datasets/${ds}/conflict-resolutions/${resolutionId}/undo`,
+      jsonInit("POST")),
 
   exportUrl: (id: number) => `/api/datasets/${id}/export`,
 };

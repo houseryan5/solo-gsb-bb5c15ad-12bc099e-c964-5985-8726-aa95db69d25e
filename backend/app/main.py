@@ -54,6 +54,15 @@ class ReviewIn(BaseModel):
     note: str = Field(default="", max_length=400)
 
 
+class ConflictGroupRef(BaseModel):
+    station: str = Field(min_length=1, max_length=40)
+    phase: Literal["P", "S"]
+
+
+class ConflictResolveIn(BaseModel):
+    groups: list[ConflictGroupRef] = Field(min_length=1)
+
+
 # ------------------------------------------------------------- datasets ------
 @app.get("/api/datasets")
 def api_list_datasets() -> list[dict[str, Any]]:
@@ -102,7 +111,74 @@ def api_analysis(ds_id: int) -> dict[str, Any]:
     _require_dataset(ds_id)
     result = analyze(crud.get_picks(ds_id))
     result["reviews"] = crud.get_reviews(ds_id)
+    result["last_resolution"] = crud.get_last_conflict_resolution(ds_id)
     return result
+
+
+def _outlier_picks_for_groups(
+    analysis: dict[str, Any], selected: list[tuple[str, str]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (matched groups, outlier picks) for a fresh clustering pass.
+
+    Clustering is always recomputed server-side from current picks, so the UI
+    cannot reject picks that are no longer outliers (e.g. after an edit).
+    """
+    wanted = {(s, p) for s, p in selected}
+    matched: list[dict[str, Any]] = []
+    outliers: list[dict[str, Any]] = []
+    for g in analysis["groups"]:
+        key = (g["station"], g["phase"])
+        if key not in wanted or not g["conflict"]:
+            continue
+        matched.append({"station": g["station"], "phase": g["phase"]})
+        for p in g["picks"]:
+            if p["is_outlier"]:
+                outliers.append(p)
+    return matched, outliers
+
+
+@app.post("/api/datasets/{ds_id}/conflict-resolutions")
+def api_resolve_conflicts(ds_id: int, body: ConflictResolveIn) -> dict[str, Any]:
+    _require_dataset(ds_id)
+    selected = [(g.station.strip(), g.phase) for g in body.groups]
+    # de-duplicate while preserving order
+    seen: set[tuple[str, str]] = set()
+    unique: list[tuple[str, str]] = []
+    for key in selected:
+        if key not in seen:
+            seen.add(key)
+            unique.append(key)
+
+    analysis = analyze(crud.get_picks(ds_id))
+    matched, outliers = _outlier_picks_for_groups(analysis, unique)
+    missing = sorted({(s, p) for s, p in unique} - {(g["station"], g["phase"]) for g in matched})
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail="所选分组当前不存在多簇冲突："
+                   + ", ".join(f"{s}/{p}" for s, p in missing))
+
+    resolution = crud.create_conflict_resolution(
+        ds_id, matched, [p["id"] for p in outliers])
+
+    fresh = analyze(crud.get_picks(ds_id))
+    fresh["reviews"] = crud.get_reviews(ds_id)
+    fresh["last_resolution"] = crud.get_last_conflict_resolution(ds_id)
+    return {"resolution": resolution, "analysis": fresh}
+
+
+@app.post("/api/datasets/{ds_id}/conflict-resolutions/{resolution_id}/undo")
+def api_undo_conflict_resolution(ds_id: int, resolution_id: int) -> dict[str, Any]:
+    _require_dataset(ds_id)
+    try:
+        undo = crud.undo_conflict_resolution(ds_id, resolution_id)
+    except crud.ConflictUndoStale as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    fresh = analyze(crud.get_picks(ds_id))
+    fresh["reviews"] = crud.get_reviews(ds_id)
+    fresh["last_resolution"] = crud.get_last_conflict_resolution(ds_id)
+    return {"undo": undo, "analysis": fresh}
 
 
 @app.delete("/api/datasets/{ds_id}")

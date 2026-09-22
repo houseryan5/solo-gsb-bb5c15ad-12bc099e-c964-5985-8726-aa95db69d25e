@@ -78,11 +78,62 @@ export interface Review {
   created_at: string;
 }
 
+export interface ConflictGroupRef {
+  station: string;
+  phase: Phase;
+}
+
+export interface ConflictResolutionChange {
+  id: number;
+  station: string;
+  phase: Phase;
+  time: number;
+  uncertainty: number;
+  weight: number;
+  source: string;
+  from_status: "candidate" | "rejected";
+  to_status: "candidate" | "rejected";
+}
+
+export interface ConflictResolutionSummary {
+  id: number;
+  groups: ConflictGroupRef[];
+  created_at: string;
+  undone_at: string | null;
+  rejected_count: number;
+}
+
+export interface ConflictResolution {
+  id: number;
+  created_at: string;
+  groups: ConflictGroupRef[];
+  changes: ConflictResolutionChange[];
+}
+
+export interface ConflictUndoResult {
+  id: number;
+  undone_at: string;
+  groups: ConflictGroupRef[];
+  restored: ConflictResolutionChange[];
+  missing_pick_ids: number[];
+}
+
 export interface Analysis {
   groups: Group[];
   conflicts: ConflictPair[];
   rejected: Pick[];
   reviews: Review[];
+  last_resolution: ConflictResolutionSummary | null;
+}
+
+export interface ResolveConflictsResponse {
+  resolution: ConflictResolution;
+  analysis: Analysis;
+}
+
+export interface UndoConflictsResponse {
+  undo: ConflictUndoResult;
+  analysis: Analysis;
 }
 
 export interface DatasetDetail {
